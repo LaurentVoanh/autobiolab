@@ -1,0 +1,207 @@
+<?php session_start();
+if(!isset($_SESSION['genesis_session'])) $_SESSION['genesis_session'] = bin2hex(random_bytes(8));
+$SESSION_ID = $_SESSION['genesis_session'];
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GENESIS-ULTRA — Chercheur Autonome</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Courier New',monospace;background:#fff;color:#000;font-size:12px;line-height:1.5}
+    #header{background:#000;color:#fff;padding:15px;text-align:center;font-weight:bold;font-size:16px}
+    #status-bar{padding:10px;background:#f0f0f0;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center}
+    #wrap{display:flex;gap:0;max-width:1600px;margin:0 auto}
+    .col{flex:1;padding:15px;min-height:70vh;overflow:auto;border-right:1px solid #ddd}
+    .col:last-child{border-right:none}
+    #left{background:#f8f9fa}
+    #right{background:#fff}
+    h2{font-size:14px;margin-bottom:10px;padding-bottom:5px;border-bottom:2px solid #000}
+    .log{margin:4px 0;padding:8px;background:#fff;border-left:4px solid #0066cc;font-size:11px}
+    .log.success{border-left-color:#00aa00;background:#f0fff0}
+    .log.error{border-left-color:#cc0000;background:#fff0f0;color:#900}
+    .log.info{border-left-color:#0066cc;background:#f0f8ff}
+    .log.warning{border-left-color:#ff9900;background:#fff8f0}
+    .log.waiting{border-left-color:#999;background:#f5f5f5}
+    .log.detail{border-left-color:#6600cc;background:#f9f0ff;font-size:10px;white-space:pre-wrap}
+    .hypo{background:#e8f4ff;padding:12px;margin:10px 0;border-radius:4px;border:1px solid #b3d9ff;cursor:pointer}
+    .hypo:hover{background:#d0e8ff}
+    .hypo h3{font-size:13px;margin-bottom:8px;color:#004080}
+    .hypo p{font-size:11px;margin:4px 0}
+    .badge{display:inline-block;padding:2px 6px;background:#000;color:#fff;font-size:10px;border-radius:3px;margin-right:5px}
+    .badge-high{background:#090}
+    .badge-med{background:#ff9900}
+    .badge-low{background:#999}
+    #feedback{padding:15px;background:#fff3cd;border-top:1px solid #ddd}
+    #feedback textarea{width:100%;height:80px;margin:5px 0;font-family:monospace;font-size:11px}
+    #feedback button{padding:5px 10px;background:#000;color:#fff;border:none;cursor:pointer}
+    .pagination{padding:10px;text-align:center;background:#f0f0f0;border-top:1px solid #ddd}
+    .pagination button{padding:5px 10px;margin:0 5px;background:#fff;border:1px solid #ccc;cursor:pointer}
+    .pagination button.active{background:#000;color:#fff}
+    .pulse{animation:pulse 2s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+    .detail-box{background:#fff;border:1px solid #ddd;padding:10px;margin:5px 0;font-size:10px;white-space:pre-wrap}
+    .src-tag{display:inline-block;padding:2px 5px;margin:2px;border-radius:3px;font-size:9px;font-weight:bold}
+    .src-pubmed{background:#0066cc;color:#fff}
+    .src-uniprot{background:#00aa00;color:#fff}
+    .src-clinvar{background:#cc0000;color:#fff}
+    .src-arxiv{background:#ff9900;color:#fff}
+  </style>
+</head>
+<body>
+  <div id="header">🧬 GENESIS-ULTRA — Chercheur Scientifique Autonome (4 Sources + Auto-Vérification)</div>
+  <div id="status-bar">
+    <span id="status-text">⏳ Initialisation...</span>
+    <span id="timer">00:00</span>
+    <span>📊 <span id="total-hypo">0</span> découvertes archivées</span>
+  </div>
+  <div id="wrap">
+    <div class="col" id="left">
+      <h2>🤖 Conscience IA — Ce qui se passe (détails complets)</h2>
+      <div id="logs"><em>Les actions détaillées de l'IA apparaîtront ici...</em></div>
+    </div>
+    <div class="col" id="right">
+      <h2>📄 Base de Découvertes — Archives vérifiées</h2>
+      <div id="results"><em>Les hypothèses scientifiques apparaîtront ici...</em></div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  </div>
+  <div id="feedback">
+    <strong>🐛 Rapport de Bug / Amélioration :</strong>
+    <textarea id="bug-report" readonly></textarea>
+    <button onclick="copyBugReport()">📋 Copier</button>
+    <span id="copy-status" style="margin-left:10px;color:#090"></span>
+  </div>
+
+<script>
+let startTime = Date.now(), lastLogs = [], errorCount = 0;
+let currentPage = 1, totalPages = 1, allHypotheses = [];
+
+setInterval(()=>{
+  let e = Math.floor((Date.now()-startTime)/1000);
+  document.getElementById('timer').textContent = Math.floor(e/60).toString().padStart(2,'0')+':'+(e%60).toString().padStart(2,'0');
+}, 1000);
+
+function updateBugReport() {
+  document.getElementById('bug-report').value = `=== GENESIS-ULTRA BUG ===\nSession: <?=$SESSION_ID?>\nTime: ${new Date().toISOString()}\nStatus: ${document.getElementById('status-text').textContent}\nErrors: ${errorCount}\nLogs:\n${lastLogs.slice(-10).map(l=>`  - ${l.msg}`).join('\n')}`;
+}
+function copyBugReport() {
+  document.getElementById('bug-report').select();
+  document.execCommand('copy');
+  document.getElementById('copy-status').textContent = '✅ Copié!';
+  setTimeout(()=>document.getElementById('copy-status').textContent='', 2000);
+}
+
+// Charger les découvertes depuis le serveur
+function loadHypotheses(page = 1) {
+  fetch('agent.php?action=load_hypotheses&page='+page)
+  .then(r=>r.json())
+  .then(data=>{
+    allHypotheses = data.hypotheses || [];
+    totalPages = data.total_pages || 1;
+    currentPage = page;
+    document.getElementById('total-hypo').textContent = data.total_count || 0;
+    renderHypotheses(allHypotheses);
+    renderPagination(page, totalPages);
+  });
+}
+
+function renderHypotheses(hypos) {
+  if(!hypos || hypos.length === 0) {
+    document.getElementById('results').innerHTML = '<em>Aucune découverte archivée pour le moment...</em>';
+    return;
+  }
+  document.getElementById('results').innerHTML = hypos.map((h,i)=>`
+    <div class="hypo" onclick="showDetail(${i})">
+      <h3>💡 ${h.title || 'Hypothèse'}</h3>
+      <p><strong>Cible:</strong> ${h.target || 'N/A'}</p>
+      <p><strong>Sources:</strong> ${(h.sources||[]).map(s=>`<span class="src-tag src-${s.toLowerCase()}">${s}</span>`).join(' ')}</p>
+      <p><strong>Score:</strong> <span class="badge ${h.novelty>0.7?'badge-high':(h.novelty>0.4?'badge-med':'badge-low')}">${Math.round((h.novelty||0)*100)}%</span></p>
+      <p><small>📅 ${h.timestamp ? new Date(h.timestamp*1000).toLocaleString('fr-FR') : 'N/A'}</small></p>
+    </div>
+  `).join('');
+}
+
+function renderPagination(current, total) {
+  if(total <= 1) {
+    document.getElementById('pagination').innerHTML = '';
+    return;
+  }
+  let html = '';
+  for(let i=1; i<=total; i++) {
+    html += `<button class="${i===current?'active':''}" onclick="loadHypotheses(${i})">${i}</button>`;
+  }
+  document.getElementById('pagination').innerHTML = html;
+}
+
+function showDetail(index) {
+  let h = allHypotheses[index];
+  let detail = `=== DÉCOUVERTE #${h.id || index+1} ===\n\n`+
+    `🎯 CIBLE: ${h.target}\n\n`+
+    `💡 HYPOTHÈSE:\n${h.title}\n\n`+
+    `📝 RÉSUMÉ:\n${h.summary || h.hypothesis || 'N/A'}\n\n`+
+    `🔗 SOURCES CROISÉES:\n${(h.sources||[]).join(' → ')}\n\n`+
+    `🎯 SCORE NOUVEAUTÉ: ${Math.round((h.novelty||0)*100)}%\n\n`+
+    `⚙️ ACTIONNABLE:\n${h.actionable || 'À vérifier en laboratoire'}\n\n`+
+    `📅 DATE: ${h.timestamp ? new Date(h.timestamp*1000).toLocaleString('fr-FR') : 'N/A'}\n\n`+
+    `🔍 STATUT: ${h.status || 'EN_ATTENTE_VERIFICATION'}`;
+  alert(detail);
+}
+
+function poll() {
+  fetch('agent.php?action=observe&session=<?=$SESSION_ID?>')
+  .then(r=>r.text())
+  .then(text=>{
+    if(!text.trim().startsWith('{')) throw new Error('Pas JSON: '+text.substring(0,100));
+    return JSON.parse(text);
+  })
+  .then(data=>{
+    errorCount = 0;
+    if(data.logs && data.logs.length > 0) {
+      lastLogs = data.logs;
+      updateBugReport();
+      document.getElementById('logs').innerHTML = data.logs.map(l=>{
+        let cls = l.type || 'info';
+        let detail = l.detail ? `<div class="detail-box">${l.detail}</div>` : '';
+        return `<div class="log ${cls}"><small>[${l.time||'--:--'}]</small> ${l.msg}${detail}</div>`;
+      }).join('');
+      document.getElementById('logs').scrollTop = document.getElementById('logs').scrollHeight;
+    }
+    if(data.new_hypothesis) {
+      loadHypotheses(1); // Recharger la page 1
+    }
+    if(data.status==='error') {
+      document.getElementById('status-text').textContent = '❌ Erreur';
+      document.getElementById('status-text').style.color = '#900';
+    }
+  })
+  .catch(err=>{
+    errorCount++;
+    document.getElementById('logs').innerHTML += `<div class="log error">${err.message}</div>`;
+    updateBugReport();
+  });
+}
+
+window.onload = function() {
+  fetch('agent.php?action=init&session=<?=$SESSION_ID?>')
+  .then(r=>r.text())
+  .then(text=>{
+    if(!text.trim().startsWith('{')) throw new Error('Init pas JSON');
+    return JSON.parse(text);
+  })
+  .then(data=>{
+    if(data.ok) {
+      document.getElementById('status-text').textContent = '🔄 Recherche autonome en cours...';
+      document.getElementById('status-text').style.color = '#090';
+      loadHypotheses(1); // Charger les découvertes
+      setInterval(poll, 3000); // Polling toutes les 3s
+    } else throw new Error('Init échouée');
+  })
+  .catch(err=>{
+    document.getElementById('status-text').textContent = '❌ '+err.message;
+    document.getElementById('logs').innerHTML = `<div class="log error">${err.message}</div>`;
+  });
+};
+</script>
+</body>
+</html>
